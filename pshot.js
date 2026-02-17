@@ -15,42 +15,45 @@ if (!targetUrl) {
 }
 
 // --- 設定 ---
-const VIEWPORT_WIDTH = 1280; //撮影幅
-const VIEWPORT_HEIGHT = 800; // 1回の撮影高さ（スクロール単位）
-const SCROLL_DELAY = 500; // スクロール後の待機時間(ms)
+const VIEWPORT_WIDTH = 1280; // CSSピクセルとしての幅
+const VIEWPORT_HEIGHT = 800; // CSSピクセルとしての高さ（スクロール単位）
+const SCROLL_DELAY = 500;    // スクロール後の待機時間(ms)
+const SCALE = 2;             // 【変更点】高画質化 (deviceScaleFactor)
 
 (async () => {
-  console.log(`[Info] 起動中... Target: ${targetUrl}`);
+  console.log(`[Info] 起動中 (High Quality Mode)... Target: ${targetUrl}`);
+  
+  // ブラウザ起動時に高画質設定を適用
   const browser = await chromium.launch();
-  const page = await browser.newPage();
+  const page = await browser.newPage({
+    viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+    deviceScaleFactor: SCALE // Retina相当の描画
+  });
 
   try {
-    await page.setViewportSize({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT });
-
     console.log('[Info] ページを読み込んでいます...');
     await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 });
     await page.waitForTimeout(2000); // 初期レンダリング待機
 
-    // --- 【重要】追従要素（固定ヘッダー/フッター）を隠す処理 ---
+    // --- 追従要素（固定ヘッダー/フッター）を隠す処理 ---
     console.log('[Info] 固定配置の要素(header/footer等)を非表示にしています...');
     await page.evaluate(() => {
       const elements = document.querySelectorAll('*');
       for (const el of elements) {
         const style = window.getComputedStyle(el);
-        // position: fixed または sticky の要素を見つける
         if (style.position === 'fixed' || style.position === 'sticky') {
-          // レイアウト崩れを抑えつつ見えなくする
           el.style.setProperty('visibility', 'hidden', 'important');
         }
       }
     });
-    await page.waitForTimeout(500); // 反映待機
+    await page.waitForTimeout(500);
 
     // --- ページ情報の取得 ---
     const { totalHeight } = await page.evaluate(() => {
       return { totalHeight: document.documentElement.scrollHeight };
     });
-    console.log(`[Info] ページ全体の高さ: ${totalHeight}px`);
+    console.log(`[Info] ページ全体の高さ(CSS px): ${totalHeight}px`);
+    console.log(`[Info] 出力画像の高さ(Physical px): ${totalHeight * SCALE}px`);
 
     // --- スクロール撮影ループ ---
     const screenshots = [];
@@ -62,55 +65,57 @@ const SCROLL_DELAY = 500; // スクロール後の待機時間(ms)
     while (currentY < totalHeight) {
       // 指定位置へスクロール
       await page.evaluate((y) => window.scrollTo(0, y), currentY);
-      await page.waitForTimeout(SCROLL_DELAY); // 描画待ち
+      await page.waitForTimeout(SCROLL_DELAY);
 
-      // 現在のビューポートを撮影
       console.log(`  - 撮影中: パート${count} (Y: ${currentY})`);
-      const buffer = await page.screenshot({ fullPage: false }); // ※fullPage: falseを明示
+      
+      // 撮影（データは deviceScaleFactor: 2 なので2倍サイズで返ってくる）
+      const buffer = await page.screenshot({ fullPage: false });
       
       screenshots.push({
         buffer: buffer,
-        top: currentY // この画像が全体のどこに位置するか
+        top: currentY * SCALE // 【重要】結合時のY座標もスケール倍する
       });
 
       currentY += VIEWPORT_HEIGHT;
       count++;
     }
 
-    // --- 画像の結合処理 (Sharp使用) ---
+    // --- 画像の結合処理 ---
     console.log('[Info] 画像を結合しています...');
     
-    // ベースとなる巨大な空画像を作成
+    // ベース画像もスケール倍のサイズで作成
     const baseImage = sharp({
       create: {
-        width: VIEWPORT_WIDTH,
-        height: totalHeight,
+        width: VIEWPORT_WIDTH * SCALE,
+        height: totalHeight * SCALE,
         channels: 4,
         background: { r: 255, g: 255, b: 255, alpha: 1 }
       }
     });
 
-    // 撮影した画像を合成するための設定を作成
     const composites = screenshots.map(shot => ({
       input: shot.buffer,
       top: shot.top,
       left: 0,
-      // 最後の画像がページからはみ出る場合の対策（gravity: northで上合わせにする）
       gravity: 'north'
     }));
 
-    // 合成実行
+    // メタデータ制限（巨大画像エラー防止）を解除して処理
     const finalImageBuffer = await baseImage
       .composite(composites)
-      .png() // PNG形式
+      .png()
       .toBuffer();
 
-    // --- ファイル保存 ---
-    let filename = path.basename(new URL(targetUrl).pathname);
-    if (!filename || filename === '/') filename = 'index';
-    if (!path.extname(filename)) filename += '.png';
-    // 拡張子が.htmlなどだった場合は.pngに置換
-    filename = filename.replace(/\.(html|htm|php)$/i, '') + '.png';
+    // --- ファイル保存（ファイル名修正済み） ---
+    // URLのパス部分からファイル名を取得し、拡張子(.htmlなど)があれば除去
+    let name = path.parse(new URL(targetUrl).pathname).name;
+    
+    // ルートパスなどの場合は index にする
+    if (!name || name === '/') name = 'index';
+    
+    // 常に .png を1つだけ付与
+    const filename = `${name}.png`;
 
     fs.writeFileSync(filename, finalImageBuffer);
     console.log(`[Success] 完了: ${filename} に保存しました。`);
