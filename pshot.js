@@ -107,15 +107,25 @@ const SCALE = 2;             // 【変更点】高画質化 (deviceScaleFactor)
       .png()
       .toBuffer();
 
-    // --- ファイル保存（ファイル名修正済み） ---
-    // URLのパス部分からファイル名を取得し、拡張子(.htmlなど)があれば除去
-    let name = path.parse(new URL(targetUrl).pathname).name;
+    // --- 【変更点】ファイル名生成ロジック ---
+    const urlObj = new URL(targetUrl);
     
-    // ルートパスなどの場合は index にする
-    if (!name || name === '/') name = 'index';
-    
-    // 常に .png を1つだけ付与
-    const filename = `${name}.png`;
+    // ホスト名とパスを連結 (例: antigravity.google/docs/foo)
+    let safeName = urlObj.hostname + urlObj.pathname;
+
+    // 1. 拡張子(.htmlなど)があれば除去
+    safeName = safeName.replace(/\.(html|htm|php|jsp|asp)$/i, '');
+
+    // 2. スラッシュ(/)をアンダースコア(_)に置換
+    safeName = safeName.replace(/\//g, '_');
+
+    // 3. 連続するアンダースコアを整理 & 末尾整理
+    safeName = safeName.replace(/_+/g, '_').replace(/^_|_$/g, '');
+
+    // 4. 万が一ファイル名が空なら index にする
+    if (!safeName) safeName = 'index';
+
+    const filename = `${safeName}.png`;
 
     fs.writeFileSync(filename, finalImageBuffer);
     console.log(`[Success] 完了: ${filename} に保存しました。`);
