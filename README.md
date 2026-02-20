@@ -1,4 +1,4 @@
-# pshot - Webサイトを、画像で保存するためのコマンドラインツール
+# gshot - Webサイトを、画像で保存するためのコマンドラインツール
 
 ## 📦 できること
 
@@ -30,7 +30,7 @@ npm install
 
 ### 2. コマンドの登録
 
-`pshot` というコマンドでどこからでも呼び出せるように設定します。
+`gshot` というコマンドでどこからでも呼び出せるように設定します。
 
 ```bash
 npm link
@@ -44,10 +44,10 @@ npm link
 
 ### 基本的な使い方
 
-ターミナルを開き、`pshot` の後に保存したいURLを入力してEnterキーを押します。
+ターミナルを開き、`gshot` の後に保存したいURLを入力してEnterキーを押します。
 
 ```bash
-pshot https://antigravity.google/docs/agent-modes-settings
+gshot https://antigravity.google/docs/agent-modes-settings
 ```
 
 **実行結果:**
@@ -71,22 +71,22 @@ URLリストからまとめてダウンロードしたい場合は、以下の�
 
 ```bash
 # urls.txt というファイルにURLが1行ずつ書かれていると仮定
-while read url; do pshot "$url"; done < urls.txt
+while read url; do gshot "$url"; done < urls.txt
 ```
 
 **Windows (PowerShell) の場合:**
 
 ```powershell
 # urls.txt というファイルにURLが1行ずつ書かれていると仮定
-Get-Content urls.txt | ForEach-Object { pshot $_ }
+Get-Content urls.txt | ForEach-Object { gshot $_ }
 ```
 
 ---
 
 ## ❓ よくある質問 (FAQ)
 
-**Q. 「command not found」や「pshot は内部コマンド...として認識されていません」と出る**
-A. `npm link` が正しく完了していない可能性があります。再度実行するか、PCを再起動してみてください。それでも直らない場合は、`node pshot.js <URL>` のように直接ファイルを実行してください。
+**Q. 「command not found」や「gshot は内部コマンド...として認識されていません」と出る**
+A. `npm link` が正しく完了していない可能性があります。再度実行するか、PCを再起動してみてください。それでも直らない場合は、`node gshot.js <URL>` のように直接ファイルを実行してください。
 
 **Q. ページが真っ白なまま保存される**
 A. サイトの読み込みが非常に遅い場合があります。スクリプト内の `timeout` 設定を延ばすか、ネットワーク環境を確認してください。
@@ -100,5 +100,5 @@ A. いいえ、このツールは「ログインしていない新しいブラ�
 
 ツールが不要になった場合は、以下の手順で削除してください。
 
-1. コマンドの登録解除: `npm unlink -g pshot`
+1. コマンドの登録解除: `npm unlink -g gshot`
 2. フォルダの削除: このツールのフォルダごと削除してください。

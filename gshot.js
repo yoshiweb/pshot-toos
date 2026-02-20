@@ -10,7 +10,7 @@ const targetUrl = process.argv[2];
 
 if (!targetUrl) {
   console.error('エラー: URLを指定してください。');
-  console.error('使用法: node pshot.js <URL>');
+  console.error('使用法: node gshot.js <URL>');
   process.exit(1);
 }
 
