@@ -47,11 +47,11 @@ npm link
 ターミナルを開き、`gshot` の後に保存したいURLを入力してEnterキーを押します。
 
 ```bash
-gshot https://antigravity.google/docs/agent-modes-settings
+gshot https://www.yahoo.co.jp/
 ```
 
 **実行結果:**
-成功すると、現在のフォルダに `https_antigravity.google_docs_agent-modes-settings-20260220-100208.166.png` というファイルが保存されます。
+成功すると、現在のフォルダに `https___www.yahoo.co.jp_2026-02-20_18-32-15.541.png` というファイルが保存されます。
 成功すると、カレントディレクトリに、ページ全体が写った縦長のPNG画像が保存されます。固定ヘッダーなどは非表示になっているため、スクロールの継ぎ目に写り込んでいないはずです。
 
 

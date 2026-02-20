@@ -1,153 +1,201 @@
 #!/usr/bin/env node
-
-const { chromium } = require('playwright');
-const sharp = require('sharp');
-const fs = require('fs');
+const { chromium, devices } = require('playwright');
 const path = require('path');
-const { URL } = require('url');
 
-const targetUrl = process.argv[2];
-
-if (!targetUrl) {
-  console.error('エラー: URLを指定してください。');
-  console.error('使用法: node gshot.js <URL>');
-  process.exit(1);
+// ==========================================
+// ユーティリティ関数
+// ==========================================
+function getDateString() {
+  const now = new Date();
+  const YYYY = now.getFullYear();
+  const MM = String(now.getMonth() + 1).padStart(2, '0');
+  const DD = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const mmm = String(now.getMilliseconds()).padStart(3, '0');
+  return `${YYYY}-${MM}-${DD}_${hh}-${mm}-${ss}.${mmm}`;
 }
 
-// --- 設定 ---
-const VIEWPORT_WIDTH = 1280; // CSSピクセルとしての幅
-const VIEWPORT_HEIGHT = 800; // CSSピクセルとしての高さ（スクロール単位）
-const SCROLL_DELAY = 500;    // スクロール後の待機時間(ms)
-const SCALE = 2;             // 【変更点】高画質化 (deviceScaleFactor)
+function url2filename(url) {
+  return url.replace(/[\/:?#&=~]/g, '_');
+}
 
-(async () => {
-  console.log(`[Info] 起動中 (High Quality Mode)... Target: ${targetUrl}`);
-  
-  // ブラウザ起動時に高画質設定を適用
-  const browser = await chromium.launch();
-  const page = await browser.newPage({
-    viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-    deviceScaleFactor: SCALE // Retina相当の描画
-  });
+// ==========================================
+// スクリーンショット撮影クラス
+// ==========================================
+class GetScreenshot {
+  constructor() {
+    this._browser = null;
+  }
 
-  try {
-    console.log('[Info] ページを読み込んでいます...');
-    await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 });
-    await page.waitForTimeout(2000); // 初期レンダリング待機
-
-    // --- 追従要素（固定ヘッダー/フッター）を隠す処理 ---
-    console.log('[Info] 固定配置の要素(header/footer等)を非表示にしています...');
-    await page.evaluate(() => {
-      const elements = document.querySelectorAll('*');
-      for (const el of elements) {
-        const style = window.getComputedStyle(el);
-        if (style.position === 'fixed' || style.position === 'sticky') {
-          el.style.setProperty('visibility', 'hidden', 'important');
-        }
-      }
+  async init() {
+    // Playwright で Chromium を起動
+    this._browser = await chromium.launch({
+      headless: true,
+      args: ['--window-position=0,0']
     });
-    await page.waitForTimeout(500);
+  }
 
-    // --- ページ情報の取得 ---
-    const { totalHeight } = await page.evaluate(() => {
-      return { totalHeight: document.documentElement.scrollHeight };
-    });
-    console.log(`[Info] ページ全体の高さ(CSS px): ${totalHeight}px`);
-    console.log(`[Info] 出力画像の高さ(Physical px): ${totalHeight * SCALE}px`);
+  async autoScroll(page) {
+    await page.evaluate(async () => {
+      await new Promise((resolve) => {
+        let totalHeight = 0;
+        const distance = 100;
+        const MAX_HEIGHT = 16384;
 
-    // --- スクロール撮影ループ ---
-    const screenshots = [];
-    let currentY = 0;
-    let count = 1;
+        const timer = setInterval(() => {
+          const scrollHeight = document.body.scrollHeight;
+          window.scrollBy(0, distance);
+          totalHeight += distance;
 
-    console.log('[Info] スクロール撮影を開始します...');
-
-    while (currentY < totalHeight) {
-      // 指定位置へスクロール
-      await page.evaluate((y) => window.scrollTo(0, y), currentY);
-      await page.waitForTimeout(SCROLL_DELAY);
-
-      console.log(`  - 撮影中: パート${count} (Y: ${currentY})`);
-      
-      // 撮影（データは deviceScaleFactor: 2 なので2倍サイズで返ってくる）
-      const buffer = await page.screenshot({ fullPage: false });
-      
-      screenshots.push({
-        buffer: buffer,
-        top: currentY * SCALE // 【重要】結合時のY座標もスケール倍する
+          if (totalHeight >= scrollHeight || totalHeight >= MAX_HEIGHT) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 100);
       });
+    });
+  }
 
-      currentY += VIEWPORT_HEIGHT;
-      count++;
+  async cap({ url, username, password, isSP }) {
+    const MAX_HEIGHT = 16384;
+    const result = { url, status: null, error: null, imgPath: null };
+
+    if (!this._browser) {
+      result.error = 'ブラウザが初期化されていません。';
+      return result;
     }
 
-    // --- 画像の結合処理 ---
-    console.log('[Info] 画像を結合しています...');
-    
-    // ベース画像もスケール倍のサイズで作成
-    const baseImage = sharp({
-      create: {
-        width: VIEWPORT_WIDTH * SCALE,
-        height: totalHeight * SCALE,
-        channels: 4,
-        background: { r: 255, g: 255, b: 255, alpha: 1 }
+    // 1. コンテキスト（ブラウザのセッション）の設定
+    let contextOptions = {};
+
+    // デバイス設定（Playwrightのプリセットを使用）
+    if (isSP) {
+      contextOptions = { ...devices['iPhone 13'] };
+    } else {
+      contextOptions = { viewport: { width: 1600, height: 950 } };
+    }
+
+    // Basic認証設定
+    if (username && password) {
+      contextOptions.httpCredentials = { username, password };
+    }
+
+    const context = await this._browser.newContext(contextOptions);
+    const page = await context.newPage();
+
+    try {
+      // 2. イベントリスナー設定
+      page.on('response', res => {
+        const request_url = url.replace(/#.*$/, '');
+        if (res.url() === request_url) {
+          result.status = res.status();
+        }
+      });
+
+      page.on('dialog', dialog => dialog.dismiss());
+
+      // 3. ページへアクセス (waitUntil は Playwright では networkidle になります)
+      const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 10000 })
+        .catch((e) => {
+          console.log(`アクセス時のタイムアウト (${e.name}): 描画されている可能性があるので続行します`);
+        });
+
+      if (response) {
+        result.status = response.status();
+      } else if (!result.status) {
+        result.status = 200; 
       }
-    });
 
-    const composites = screenshots.map(shot => ({
-      input: shot.buffer,
-      top: shot.top,
-      left: 0,
-      gravity: 'north'
-    }));
+      if (result.status >= 400) {
+        result.error = `HTTP Status ${result.status}`;
+        return result;
+      }
 
-    // メタデータ制限（巨大画像エラー防止）を解除して処理
-    const finalImageBuffer = await baseImage
-      .composite(composites)
-      .png()
-      .toBuffer();
+      // 4. ページ全体のスクロール
+      await this.autoScroll(page);
 
-    // --- 【変更点】ファイル名生成ロジック ---
-    const urlObj = new URL(targetUrl);
+      // 5. ビューポートの再調整
+      const bodyHeight = await page.evaluate(() => document.body.scrollHeight);
+      const targetHeight = Math.min(bodyHeight, isSP ? MAX_HEIGHT / 2 : MAX_HEIGHT);
+      
+      await page.setViewportSize({ 
+        width: isSP ? 390 : 1600, 
+        height: targetHeight 
+      });
+      await page.evaluate(() => window.scrollTo(0, 0));
+
+      // スクロール後、レイアウトが安定するまで少し待機
+      await new Promise(r => setTimeout(r, 1000));
+
+      // 6. スクリーンショット撮影
+      const filename = `${url2filename(url)}_${getDateString()}`;
+      const imgPath = path.resolve(`${filename}.png`);
+      result.imgPath = imgPath;
+
+      await page.screenshot({ path: imgPath, timeout: 5000 })
+        .catch((e) => {
+            result.error = `スクリーンショット失敗: ${e.message}`;
+        });
+
+    } catch (error) {
+      result.error = `キャプチャ中にエラーが発生しました: ${error.message}`;
+    } finally {
+      await page.close();
+      await context.close();
+    }
+
+    return result;
+  }
+
+  async close() {
+    if (this._browser) {
+      await this._browser.close();
+    }
+  }
+}
+
+// ==========================================
+// メイン処理 (エントリーポイント)
+// ==========================================
+(async () => {
+  const url = process.argv[2];
+  const device = process.argv[3] || 'PC'; 
+  const username = process.argv[4] || ''; 
+  const password = process.argv[5] || ''; 
+
+  if (!url) {
+    console.error('【エラー】URLが指定されていません。');
+    console.error('使い方: chaptte <URL> [SP/PC] [Basicユーザー名] [Basicパスワード]');
+    process.exit(1);
+  }
+
+  const isSP = (device.toUpperCase() === 'SP');
+
+  console.log('=== 処理開始 ===');
+  console.log(`対象URL: ${url}`);
+  console.log(`デバイス: ${isSP ? 'スマートフォン' : 'PC'}`);
+
+  const screenshotter = new GetScreenshot();
+
+  try {
+    await screenshotter.init();
     
-    // URL全体（プロトコルを含む）をベースにする
-    let safeName = urlObj.href;
+    console.log('\n--- スクリーンショット撮影中 ---');
+    const result = await screenshotter.cap({ url, username, password, isSP });
 
-    // クエリパラメータ（?以降）やハッシュ（#以降）を考慮して拡張子を除去
-    safeName = safeName.replace(/\.(html|htm|php|jsp|asp)(?=$|\?|#)/i, '');
-
-    // コロン(:)、スラッシュ(/)、クエスチョン(?)、アンパサンド(&)、イコール(=)、ハッシュ(#)をアンダースコア(_)に置換
-    safeName = safeName.replace(/[:\/?&=#]/g, '_');
-
-    // 連続するアンダースコアを整理 & 末尾整理
-    safeName = safeName.replace(/_+/g, '_').replace(/^_|_$/g, '');
-
-    // 万が一空ならindex
-    if (!safeName) safeName = 'index';
-
-    // 現在日時の取得とフォーマット (yyyyMMdd-HHmmss.SSS)
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const MM = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const HH = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    const SSS = String(now.getMilliseconds()).padStart(3, '0');
-
-    // ハイフンやドットを含めたタイムスタンプ文字列の生成
-    const timestamp = `-${yyyy}${MM}${dd}-${HH}${mm}${ss}.${SSS}`;
-
-    // 拡張子 .png を付与し、その直前にタイムスタンプを結合
-    const filename = `${safeName}${timestamp}.png`;
-    // -------------------------------------------------------
-
-    fs.writeFileSync(filename, finalImageBuffer);
-    console.log(`[Success] 完了: ${filename} に保存しました。`);
+    if (result.error) {
+      console.error('【エラー】スクリーンショットに失敗しました:', result.error);
+    } else {
+      console.log('撮影完了！');
+      console.log('保存先パス:', result.imgPath);
+    }
 
   } catch (error) {
-    console.error(`[Error] 失敗しました: ${error.message}`);
+    console.error('【予期せぬエラー】処理中にエラーが発生しました:', error);
   } finally {
-    await browser.close();
+    await screenshotter.close();
+    console.log('\n=== 処理終了 ===');
   }
 })();
